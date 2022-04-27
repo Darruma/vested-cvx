@@ -16,6 +16,7 @@ import "../interfaces/cvx/ICVXBribes.sol";
 import "../interfaces/cvx/IVotiumBribes.sol";
 import "../interfaces/snapshot/IDelegateRegistry.sol";
 import "../interfaces/curve/ICurvePool.sol";
+import "../interfaces/hiddenhand/IRewardDistributor.sol"
 
 import {BaseStrategy} from "../deps/BaseStrategy.sol";
 
@@ -52,14 +53,15 @@ contract MyStrategy is BaseStrategy, ReentrancyGuardUpgradeable {
 
     bytes32 public constant DELEGATED_SPACE =
         0x6376782e65746800000000000000000000000000000000000000000000000000;
-    
-    ISettV4 public constant CVXCRV_VAULT =
+
+    // TODO: Build this vault as cvxCRV replacement for aura 
+    ISettV4 public constant AURABAL_VAULT =
         ISettV4(0x2B5455aac8d64C14786c3a29858E43b5945819C0);
 
     // NOTE: Locker V2
     ICvxLocker public constant LOCKER = ICvxLocker(0x72a19342e8F1838460eBFCCEf09F6585e32db86E);
 
-    ICVXBribes public constant CVX_EXTRA_REWARDS = ICVXBribes(0xDecc7d761496d30F30b92Bdf764fb8803c79360D);
+    ICVXBribes public constant AURA_EXTRA_REWARDS = ICVXBribes(0xDecc7d761496d30F30b92Bdf764fb8803c79360D);
     IVotiumBribes public constant VOTIUM_BRIBE_CLAIMER = IVotiumBribes(0x378Ba9B73309bE80BF4C2c027aAD799766a7ED5A);
     
     // We hardcode, an upgrade is required to change this as it's a meaningful change
@@ -129,7 +131,7 @@ contract MyStrategy is BaseStrategy, ReentrancyGuardUpgradeable {
         withdrawalFee = _feeConfig[2];
 
         
-        IERC20Upgradeable(reward).safeApprove(address(CVXCRV_VAULT), type(uint256).max);
+        IERC20Upgradeable(reward).safeApprove(address(AURABAL_VAULT), type(uint256).max);
 
         /// @dev do one off approvals here
         // Permissions for Locker
@@ -218,7 +220,7 @@ contract MyStrategy is BaseStrategy, ReentrancyGuardUpgradeable {
 
     /// @dev given a token address, and convexAddress claim that as reward from CVX Extra Rewards
     /// @notice funds are transfered to the hardcoded address BRIBES_RECEIVER
-    function claimBribeFromConvex (ICVXBribes convexAddress, address token) external nonReentrant {
+    function claimBribesFromAura(ICVXBribes auraAddress, address token) external nonReentrant {
         _onlyGovernanceOrStrategist();
         uint256 beforeVaultBalance = _getBalance();
         uint256 beforePricePerFullShare = _getPricePerFullShare();
@@ -226,7 +228,7 @@ contract MyStrategy is BaseStrategy, ReentrancyGuardUpgradeable {
 
         uint256 beforeBalance = IERC20Upgradeable(token).balanceOf(address(this));
         // Claim reward for token
-        convexAddress.getReward(address(this), token);
+        auraAddress.getReward(address(this), token);
         uint256 afterBalance = IERC20Upgradeable(token).balanceOf(address(this));
 
         _handleRewardTransfer(token, afterBalance.sub(beforeBalance));
@@ -238,7 +240,7 @@ contract MyStrategy is BaseStrategy, ReentrancyGuardUpgradeable {
     /// @dev Given the ExtraRewards address and a list of tokens, claims and processes them
     /// @notice permissioneless function as all paths are hardcoded // In the future
     /// @notice allows claiming any token as it uses the difference in balance
-    function claimBribesFromConvex(ICVXBribes convexAddress, address[] memory tokens) external nonReentrant {
+    function claimBribesFromAura(ICVXBribes auraAddress, address[] memory tokens) external nonReentrant {
         _onlyGovernanceOrStrategist();
         uint256 beforeVaultBalance = _getBalance();
         uint256 beforePricePerFullShare = _getPricePerFullShare();
@@ -251,7 +253,7 @@ contract MyStrategy is BaseStrategy, ReentrancyGuardUpgradeable {
         }
 
         // Claim reward for tokens
-        convexAddress.getRewards(address(this), tokens);
+        auraAddress.getRewards(address(this), tokens);
 
         // Send reward to Multisig
         for(uint x = 0; x < length; x++){
@@ -262,10 +264,10 @@ contract MyStrategy is BaseStrategy, ReentrancyGuardUpgradeable {
         require(beforePricePerFullShare == _getPricePerFullShare(), "Ppfs can't change");
     }
 
-    /// @dev given the votium data and their tree address (available at: https://github.com/oo-00/Votium/tree/main/merkle)
+    /// @dev Claim bribes from the hidden hand tree 
     /// @dev allows claiming of rewards, badger is sent to tree
-    function claimBribeFromVotium(
-        IVotiumBribes votiumTree,
+    function claimBribeFromHiddenHand(
+        IRewardsDistributor rewardsDistributor,
         address token, 
         uint256 index, 
         address account, 
@@ -273,61 +275,36 @@ contract MyStrategy is BaseStrategy, ReentrancyGuardUpgradeable {
         bytes32[] calldata merkleProof
     ) external nonReentrant {
         _onlyGovernanceOrStrategist();
-        uint256 beforeVaultBalance = _getBalance();
-        uint256 beforePricePerFullShare = _getPricePerFullShare();
-
-        uint256 beforeBalance = IERC20Upgradeable(token).balanceOf(address(this));
-        votiumTree.claim(token, index, account, amount, merkleProof);
-        uint256 afterBalance = IERC20Upgradeable(token).balanceOf(address(this));
-
-        _handleRewardTransfer(token, afterBalance.sub(beforeBalance));
-
-        require(beforeVaultBalance == _getBalance(), "Balance can't change");
-        require(beforePricePerFullShare == _getPricePerFullShare(), "Ppfs can't change");
+        // TODO: implmentation for single token claim
+        // Hidden hand only has 1 function for claiming all tokens so do we need this
     }
 
-    /// @dev given the votium data (available at: https://github.com/oo-00/Votium/tree/main/merkle)
     /// @dev allows claiming of multiple rewards rewards, badger is sent to tree
     /// @notice permissioneless function as all paths are hardcoded // In the future
     /// @notice allows claiming any token as it uses the difference in balance
-    function claimBribesFromVotium(
-        IVotiumBribes votiumTree,
-        address account, 
-        address[] calldata tokens, 
-        uint256[] calldata indexes,
-        uint256[] calldata amounts, 
-        bytes32[][] calldata merkleProofs
+    function claimBribesFromHiddenHand(
+        IRewardDistributor hiddenHandDistributor,
+        Claim[] calldata _claims
     ) external nonReentrant {
         _onlyGovernanceOrStrategist();
         uint256 beforeVaultBalance = _getBalance();
         uint256 beforePricePerFullShare = _getPricePerFullShare();
+        uint256[] memory beforeBalance = new uint256[](_claims.length);
 
-        require(tokens.length == indexes.length && tokens.length == amounts.length && tokens.length == merkleProofs.length, "Length Mismatch");
-        // tokens.length = length, can't declare var as stack too deep
-        uint256[] memory beforeBalance = new uint256[](tokens.length);
-        for(uint i = 0; i < tokens.length; i++){
-            beforeBalance[i] = IERC20Upgradeable(tokens[i]).balanceOf(address(this));
+        for(uint i = 0; i < _claims.length; i++){
+            address token = hiddenHandDistributor.rewards[_claims[i].identifier].token
+            beforeBalance[i] = IERC20Upgradeable(token).balanceOf(address(this));
         }
-
-        IVotiumBribes.claimParam[] memory request = new IVotiumBribes.claimParam[](tokens.length);
-        for(uint x = 0; x < tokens.length; x++){
-            request[x] = IVotiumBribes.claimParam({
-                token: tokens[x],
-                index: indexes[x],
-                amount: amounts[x],
-                merkleProof: merkleProofs[x]
-            });
-        }
-
-        votiumTree.claimMulti(account, request);
-
-        for(uint i = 0; i < tokens.length; i++){
-            address token = tokens[i]; // Caching it allows it to compile else we hit stack too deep
+        hiddenHandDistributor.claim(_claims);
+        bool nonZeroDiff;
+        for(uint i = 0; i < _claims.length; i++) {
+            address token = hiddenHandDistributor.rewards[_claims[i].identifier].token
             _handleRewardTransfer(token, IERC20Upgradeable(token).balanceOf(address(this)).sub(beforeBalance[i]));
         }
 
         require(beforeVaultBalance == _getBalance(), "Balance can't change");
         require(beforePricePerFullShare == _getPricePerFullShare(), "Ppfs can't change");
+
     }
 
     // END TRUSTLESS
@@ -497,24 +474,24 @@ contract MyStrategy is BaseStrategy, ReentrancyGuardUpgradeable {
         uint256 earnedReward =
             IERC20Upgradeable(reward).balanceOf(address(this)).sub(_beforeReward);
 
-        uint256 cvxCrvToGovernance = earnedReward.mul(performanceFeeGovernance).div(MAX_FEE);
-        if(cvxCrvToGovernance > 0){
-            CVXCRV_VAULT.depositFor(IController(controller).rewards(), cvxCrvToGovernance);
-            emit PerformanceFeeGovernance(IController(controller).rewards(), address(CVXCRV_VAULT), cvxCrvToGovernance, block.number, block.timestamp);
+        uint256 auraBalToGovernance = earnedReward.mul(performanceFeeGovernance).div(MAX_FEE);
+        if(auraBalToGovernance > 0){
+            AURABAL_VAULT.depositFor(IController(controller).rewards(), auraBalToGovernance);
+            emit PerformanceFeeGovernance(IController(controller).rewards(), address(AURABAL_VAULT), auraBalToGovernance, block.number, block.timestamp);
         }
-        uint256 cvxCrvToStrategist = earnedReward.mul(performanceFeeStrategist).div(MAX_FEE);
-        if(cvxCrvToStrategist > 0){
-            CVXCRV_VAULT.depositFor(strategist, cvxCrvToStrategist);
-            emit PerformanceFeeStrategist(strategist, address(CVXCRV_VAULT), cvxCrvToStrategist, block.number, block.timestamp);   
+        uint256 auraBalToStrategist = earnedReward.mul(performanceFeeStrategist).div(MAX_FEE);
+        if(auraBalToStrategist > 0){
+            AURABAL_VAULT.depositFor(strategist, auraBalToStrategist);
+            emit PerformanceFeeStrategist(strategist, address(AURABAL_VAULT), auraBalToStrategist, block.number, block.timestamp);   
         }
 
         // Send rest of earned to tree //We send all rest to avoid dust and avoid protecting the token
         // We take difference of vault token to emit the event in shares rather than underlying
-        uint256 cvxCRVInitialBalance = CVXCRV_VAULT.balanceOf(BADGER_TREE);
-        uint256 cvxCrvToTree = IERC20Upgradeable(reward).balanceOf(address(this));
-        CVXCRV_VAULT.depositFor(BADGER_TREE, cvxCrvToTree);
-        uint256 cvxCRVAfterBalance = CVXCRV_VAULT.balanceOf(BADGER_TREE);
-        emit TreeDistribution(address(CVXCRV_VAULT), cvxCRVAfterBalance.sub(cvxCRVInitialBalance), block.number, block.timestamp);
+        uint256 auraBALInitialBalance = AURABAL_VAULT.balanceOf(BADGER_TREE);
+        uint256 auraBalToTree = IERC20Upgradeable(reward).balanceOf(address(this));
+        AURABAL_VAULT.depositFor(BADGER_TREE, auraBalToTree);
+        uint256 auraBALAfterBalance = AURABAL_VAULT.balanceOf(BADGER_TREE);
+        emit TreeDistribution(address(AURABAL_VAULT), auraBALAfterBalance.sub(auraBALInitialBalance), block.number, block.timestamp);
 
         /// @dev Harvest event that every strategy MUST have, see BaseStrategy
         emit Harvest(earnedReward, block.number);
